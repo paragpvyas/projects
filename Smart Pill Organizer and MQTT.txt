@@ -1,0 +1,756 @@
+import jedi
+import json
+from datetime import *
+from guizero import App, Text, TextBox, Box, PushButton, Window
+from enum import Enum
+import paho.mqtt.client as mqtt
+import paho.mqtt.subscribe as subscribe
+import paho.mqtt.publish as publish
+from gpiozero import Button
+import copy
+import smtplib 
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+
+class Day(Enum):
+    SUN=0
+    MON=1
+    TUE=2
+    WED=3
+    THU=4
+    FRI=5
+    SAT=6
+    
+class ScheduleField(Enum):
+    SCHEDULESTART = 7
+    SCHEDULEEND = 8
+    SCHEDULESTATE = 9
+
+class State(Enum):
+    SCH=0
+    RUN=1
+    TER=2
+    
+class DayField(Enum):
+    STARTDATE=0
+    STARTTIME=1
+    ENDTIME=2
+    DAYSTATE=3
+    PILLONE=4
+    PILLTWO=5
+    PILLTHREE=6
+    PILLPRESENCE=7
+    
+class MessageDayField(Enum):
+    STARTDATE=0
+    STARTTIME=1
+    ENDTIME=2
+    PILLONE=3
+    PILLTWO=4
+    PILLTHREE=5
+    
+class SensorField(Enum):
+    BAG=0
+    MESSAGESENT=1
+    
+
+dateformat = '%A-%B-%d-%Y'
+timeformat = '%I:%M:%S %p'
+
+guidateformat = '%A %B %d %Y'
+guitimeformat = '%I:%M:%S'
+
+
+
+############################################## TEST DICTIONARIES INSTANCES ################################################################
+
+##pdict = {Day.SUN.value: [], Day.MON.value: [], Day.TUE.value: [], Day.WED.value: [], Day.THU.value: [], Day.FRI.value: [],
+##         Day.SAT.value: []}
+
+##
+    
+##pdict = {
+##        Day.SUN.value: [date.fromisoformat('2019-11-22'), time.fromisoformat('09:00:00'), time.fromisoformat('21:00:00'),
+##                  State.RUN.value, "Tylenol 20mg","Tylenol 20mg", "Tylenol 20mg", True],
+##        Day.MON.value: [date.fromisoformat('2019-11-22'), time.fromisoformat('09:00:00'), time.fromisoformat('21:00:00'),
+##                  State.RUN.value, "Tylenol 20mg","Tylenol 20mg", "Tylenol 20mg", True],
+##        Day.TUE.value: [date.fromisoformat('2019-11-22'), time.fromisoformat('09:00:00'), time.fromisoformat('21:00:00'),
+##                  State.RUN.value, "Tylenol 20mg","Tylenol 20mg", "Tylenol 20mg", True],
+##        Day.WED.value: [date.fromisoformat('2019-11-22'), time.fromisoformat('09:00:00'), time.fromisoformat('21:00:00'),
+##                  State.RUN.value, "Tylenol 20mg","Tylenol 20mg", "Tylenol 20mg", True],
+##        Day.THU.value: [date.fromisoformat('2019-11-22'), time.fromisoformat('09:00:00'), time.fromisoformat('21:00:00'),
+##                  State.RUN.value, "Tylenol 20mg","Tylenol 20mg", "Tylenol 20mg", True],
+##        Day.FRI.value: [date.fromisoformat('2019-11-22'), time.fromisoformat('09:00:00'), time.fromisoformat('21:00:00'),
+##                  State.RUN.value, "Tylenol 20mg","Tylenol 20mg", "Tylenol 20mg", True],
+##        Day.SAT.value: [date.fromisoformat('2019-11-22'), time.fromisoformat('09:00:00'), time.fromisoformat('21:00:00'),
+##                  State.RUN.value, "Tylenol 20mg","Tylenol 20mg", "Tylenol 20mg", True],
+##        ScheduleField.SCHEDULESTART.value: date.fromisoformat('2019-11-22'),
+##        ScheduleField.SCHEDULEEND.value: date.fromisoformat('2019-11-27'),
+##        ScheduleField.SCHEDULESTATE.value: State.SCH.value
+##        }
+
+
+
+############################################# PILL DEVICE #######################################################################
+    
+def savetofile(pdict2):
+    listfromdict = []
+    for day in Day:
+        for field in DayField:
+            listfromdict.append(pdict2[day.value][field.value])
+    for schedulefield in ScheduleField:
+        listfromdict.append(pdict2[schedulefield.value])
+    with open("storedstate.json", "w") as write_file:
+        json.dump(listfromdict, write_file, default=str)
+
+def loadfromfile():
+    jsondesList = None
+    with open("storedstate.json", "r") as read_file:
+        jsondesList = json.load(read_file)
+    pdict2 = {Day.SUN.value: [], Day.MON.value: [], Day.TUE.value: [],
+              Day.WED.value: [], Day.THU.value: [], Day.FRI.value: [],
+              Day.SAT.value: [], ScheduleField.SCHEDULESTART.value: None,
+              ScheduleField.SCHEDULEEND.value: None, ScheduleField.SCHEDULESTATE.value: None}
+    listpointer=0
+    for day in Day:
+        for field in DayField:
+            if field is DayField.STARTDATE:
+                pdict2[day.value].append(date.fromisoformat(jsondesList[listpointer]))
+            elif field is DayField.STARTTIME:
+                pdict2[day.value].append(time.fromisoformat(jsondesList[listpointer]))
+            elif field is DayField.ENDTIME:
+                pdict2[day.value].append(time.fromisoformat(jsondesList[listpointer]))
+            elif field is DayField.DAYSTATE:
+                pdict2[day.value].append(jsondesList[listpointer])
+            elif field is DayField.PILLONE:
+                pdict2[day.value].append(jsondesList[listpointer])
+            elif field is DayField.PILLTWO:
+                pdict2[day.value].append(jsondesList[listpointer])
+            elif field is DayField.PILLTHREE:
+                pdict2[day.value].append(jsondesList[listpointer])
+            elif field is DayField.PILLPRESENCE:
+                pdict2[day.value].append(jsondesList[listpointer])
+            else:
+                print("defaulted to loadfile else1")
+            listpointer+=1
+    for schedulefield in ScheduleField:
+        if schedulefield is ScheduleField.SCHEDULESTART:
+            pdict2[schedulefield.value] = date.fromisoformat(jsondesList[listpointer])
+        elif schedulefield is ScheduleField.SCHEDULEEND:
+            pdict2[schedulefield.value] = (date.fromisoformat(jsondesList[listpointer]))
+        elif schedulefield is ScheduleField.SCHEDULESTATE:
+            pdict2[schedulefield.value] = (jsondesList[listpointer])
+        else:
+            print("defaulted to loadfile else2")
+        listpointer+=1
+    return pdict2
+
+def createdebuggui(app2, pdict2):
+    window = Window(app2, title="Second window", width=1600, height=900)
+    dateformat = '%A-%B-%d-%Y'
+    timeformat = '%I:%M:%S %p'
+    for day in Day:
+        daybox = Box(window, width="fill", align="top", border=True, height='fill')
+        daytitle = Text(daybox, align="center", text= day.name + 
+            "<- sd: {}  st: {}  et: {}  {}  {}  {} {}  pp: {}".format(
+             str(pdict2[day.value][DayField.STARTDATE.value].strftime(dateformat)),
+             str(pdict2[day.value][DayField.STARTTIME.value].strftime(timeformat)),
+             str(pdict2[day.value][DayField.ENDTIME.value].strftime(timeformat)),
+             str(pdict2[day.value][DayField.DAYSTATE.value]),
+             str(pdict2[day.value][DayField.PILLONE.value]),
+             str(pdict2[day.value][DayField.PILLTWO.value]),
+             str(pdict2[day.value][DayField.PILLTHREE.value]),
+             str(pdict2[day.value][DayField.PILLPRESENCE.value])
+                 )#endformat
+             )
+    for schedulefield in ScheduleField:
+        daybox = Box(window, width="fill", align="top", border=True, height='fill')
+        daytitle = Text(daybox, align="center", text=str(pdict2[schedulefield.value]))    
+
+def getschedulestate(currentday, startday, endday):
+    print('hey2')
+    if currentday < startday:
+        return State.SCH.value
+    elif ((currentday > startday or currentday ==  startday)
+          and (currentday < endday or currentday ==  endday)):
+        return State.RUN.value
+    elif currentday > endday:
+        return State.TER.value
+    else:
+        print("fellthruschedulestate")
+    
+def getdaystate(currentdate, currenttime, pillstarttime, pillendtime, pillstartdate, pillpresence):
+    if pillpresence is False:
+        return State.TER.value
+    else:
+        if currentdate == pillstartdate:
+            if currenttime < pillstarttime:   
+                return State.SCH.value
+            elif currenttime > pillstarttime and currenttime < pillendtime:
+                return State.RUN.value
+            elif currenttime > pillendtime:
+                return State.TER.value
+            else:
+                print("fellthrudatestate1")
+        elif currentdate < pillstartdate:
+            return State.SCH.value
+        elif currentdate > pillstartdate:
+            return State.TER.value
+        else:
+            print("fellthrudatestate1")
+        
+def updateschedule(pdict2):
+    currentdatetime = datetime.now()
+    currentday = currentdatetime.date()
+    currenttime = currentdatetime.time()
+##    currentday = date.fromisoformat('2019-11-29') FOR TESTING
+##    currenttime = time.fromisoformat('23:51:00') 
+##    update schedule state
+    pdict2[ScheduleField.SCHEDULESTATE.value]= getschedulestate(currentday,
+                                         pdict2[ScheduleField.SCHEDULESTART.value],
+                                         pdict2[ScheduleField.SCHEDULEEND.value])                
+##    update all days
+    for day in Day:
+        pdict2[day.value][DayField.DAYSTATE.value]= getdaystate(currentday, currenttime,
+                                                            pdict2[day.value][DayField.STARTTIME.value],
+                                                            pdict2[day.value][DayField.ENDTIME.value],
+                                                            pdict2[day.value][DayField.STARTDATE.value],
+                                                            pdict2[day.value][DayField.PILLPRESENCE.value])
+def updatecurrentdaypointer(pdict2):
+    currentdatetime = datetime.now()
+    currentdate = currentdatetime.date()
+    currentday = Day.SUN.value
+    for day in Day:
+        if pdict2[day.value][DayField.STARTDATE.value] == currentdate:
+            currentday = day.value
+            break
+    return currentday
+
+def updatecurrentday(pdict2, currentday):
+    currentdatetime = datetime.now()
+    currentdate = currentdatetime.date()
+    currenttime = currentdatetime.time()
+    pdict2[currentday][DayField.DAYSTATE.value]= getdaystate(currentdate, currenttime,
+                                                            pdict2[currentday][DayField.STARTTIME.value],
+                                                            pdict2[currentday][DayField.ENDTIME.value],
+                                                            pdict2[currentday][DayField.STARTDATE.value],
+                                                            pdict2[currentday][DayField.PILLPRESENCE.value])    
+
+##RETURN EMPTY SCHEDULE ON FAILURE
+def parseschedulemessage(schedulemessage):
+##    print('parseschedulemessage')
+##    print(schedulemessage)
+    
+    try:
+        schedulelist = json.loads(schedulemessage)
+        print(type(schedulelist))
+        print(schedulelist)
+##    print(schedulelist)
+##    schedulelist = schedulemessage
+##    print(schedulelist)
+    
+        newpdict = {
+            Day.SUN.value: [],
+            Day.MON.value: [],
+            Day.TUE.value: [],
+            Day.WED.value: [],
+            Day.THU.value: [],
+            Day.FRI.value: [],
+            Day.SAT.value: [],
+            ScheduleField.SCHEDULESTART.value: None,
+            ScheduleField.SCHEDULEEND.value: None,
+            ScheduleField.SCHEDULESTATE.value: None
+            }
+    
+        listpointer=0
+        for day in Day:
+            for field in MessageDayField:            
+                if field is MessageDayField.STARTDATE:
+                    newpdict[day.value].append(date.fromisoformat(schedulelist[listpointer]))
+                elif field is MessageDayField.STARTTIME:
+                    newpdict[day.value].append(time.fromisoformat(schedulelist[listpointer]))
+                elif field is MessageDayField.ENDTIME:
+                    newpdict[day.value].append(time.fromisoformat(schedulelist[listpointer]))
+                    newpdict[day.value].append(State.SCH.value) ##ADD STATE FIELD
+                elif field is MessageDayField.PILLONE:
+                    newpdict[day.value].append(schedulelist[listpointer])
+                elif field is MessageDayField.PILLTWO:
+                    newpdict[day.value].append(schedulelist[listpointer])
+                elif field is MessageDayField.PILLTHREE:
+                    newpdict[day.value].append(schedulelist[listpointer])
+                    newpdict[day.value].append(True) ##ADD PILL PRESENCE FIELD
+                else:
+                    print("defaulted to loadmessage else1")
+##            print(newpdict)
+                listpointer+=1
+##    print('print newpdict')
+##    print(newpdict)
+        print(listpointer)
+        print(schedulelist[listpointer])
+        newpdict[ScheduleField.SCHEDULESTART.value] = date.fromisoformat(schedulelist[listpointer])
+        listpointer+=1
+        print(listpointer)
+    ############### ALL MONTHS MUST BE PREPENDED WITH 0, like 01 For Jan!!!!
+        print(schedulelist[listpointer])
+        newpdict[ScheduleField.SCHEDULEEND.value] = date.fromisoformat(schedulelist[listpointer])
+        newpdict[ScheduleField.SCHEDULESTATE.value] = State.SCH.value
+##    print(newpdict)
+        print('parsedone') 
+    except Exception as e:
+        print("there was an error")
+        print(e)
+        newpdict = None
+    
+    
+    print(newpdict)
+    return newpdict
+
+
+
+##pdict = {}    
+
+###############################     MAIN     #########################################################################
+    
+def main():
+    
+    
+    
+    
+    
+############################################# SMS #################################################################################
+    
+    
+    def sendsms(message):
+        email = "ezpillorganizer"
+        pas = *******
+        ##clarke's number
+        ##sms_gateway = '*********@vtext.com' 
+
+        sms_gateway = '**********4@vtext.com'
+
+        # The server we use to send emails in our case it will be gmail but every email provider has a different smtp 
+        # and port is also provided by the email provider.
+        smtp = "smtp.gmail.com" 
+        port = 587
+        # This will start our email server
+        server = smtplib.SMTP(smtp,port)
+        # Starting the server
+        server.starttls()
+        # Now we need to login
+        server.login(email,pas)
+
+        # Now we use the MIME module to structure our message.
+        msg = MIMEMultipart()
+        msg['From'] = email
+        msg['To'] = sms_gateway
+        # Make sure you add a new line in the subject
+        msg['Subject'] = "EZ Pill Notification"
+        # Make sure you also add new lines to your body
+        body = message
+        # and then attach that body furthermore you can also send html content.
+        msg.attach(MIMEText(body, 'plain'))
+
+        sms = msg.as_string()
+
+        server.sendmail(email,sms_gateway,sms)
+
+        # lastly quit the server
+        server.quit()
+    
+    
+    
+##########################################  SENSOR     #######################################################
+##    
+    sunsensorbag = []
+    monsensorbag = []
+    tuesensorbag = []
+    wedsensorbag = []
+    thusensorbag = []
+    frisensorbag = []
+    satsensorbag = []
+
+    sensordict = {
+          Day.SUN.value: [sunsensorbag, False],
+          Day.MON.value: [monsensorbag, False],
+          Day.TUE.value: [tuesensorbag, False],
+          Day.WED.value: [wedsensorbag, False],
+          Day.THU.value: [thusensorbag, False],
+          Day.FRI.value: [frisensorbag, False],
+          Day.SAT.value: [satsensorbag, False]
+        }
+
+##    print('sensordict upon creation')
+##    print(sensordict)
+
+    sunbtn = Button(18)
+    monbtn = Button(17)
+    tuebtn = Button(27)
+    wedbtn = Button(22)
+    thubtn = Button(23)
+    fribtn = Button(24)
+    satbtn = Button(25)
+    
+
+    def savesunevent():
+        now = datetime.now()
+        print('SundayButton: ' + str(now))
+        sensordict[Day.SUN.value][SensorField.BAG.value].append(now)
+
+    def savemonevent():
+        now = datetime.now()
+        print('mondaybutton: ' + str(now))
+        sensordict[Day.MON.value][SensorField.BAG.value].append(now)
+ 
+    def savetueevent():
+        now = datetime.now()
+        print('tuesdaybutton: ' + str(now))
+        sensordict[Day.TUE.value][SensorField.BAG.value].append(now)
+
+
+    def savewedevent():
+        now = datetime.now()
+        print('wednesdaybutton: ' + str(now))
+        sensordict[Day.WED.value][SensorField.BAG.value].append(now)
+
+    def savethuevent():
+        now = datetime.now()
+        print('thursdaybutton: ' + str(now))
+        sensordict[Day.THU.value][SensorField.BAG.value].append(now)
+
+    def savefrievent():
+        now = datetime.now()
+        print('fridaybutton: ' + str(now))
+        sensordict[Day.FRI.value][SensorField.BAG.value].append(now)
+
+    def savesatevent():
+        now = datetime.now()
+        print('saturdaybutton: ' + str(now))
+        sensordict[Day.SAT.value][SensorField.BAG.value].append(now)
+
+
+    sunbtn.when_pressed = savesunevent
+    monbtn.when_pressed = savemonevent
+    tuebtn.when_pressed = savetueevent
+    wedbtn.when_pressed = savewedevent
+    thubtn.when_pressed = savethuevent
+    fribtn.when_pressed = savefrievent
+    satbtn.when_pressed = savesatevent
+    
+#########################################  PDICT STUFF  #################################################    
+    
+    global pdict
+    pdict = {}
+    pdict = loadfromfile()
+##    print('pdict from file')
+##    print(pdict)
+    
+    
+    def replaceSchedule(newSchedule):
+        global pdict
+        print("IN REPLACE SCHEDULE")
+        print("NEW SCHEDULE")
+        print(newSchedule)
+        print("GLOBAL SCHEDULE")
+        print(pdict)
+        pdict = copy.deepcopy(newSchedule)
+        updateschedule(pdict)
+        app.update()
+        print("EXIT REPLACE SCHEDULE")
+##
+##
+##    pdict2 = {}
+##    replaceSchedule(pdict2)
+##    print("after replace schedule")
+##    print(pdict)
+##    print("doneskies")
+##################################################  APP SETUP  #############################################################
+    app = App()
+    app.width=750
+    app.height=500
+    
+    updateschedule(pdict)
+
+
+##SAVE ON CLOSE STUFF!!
+##
+##    def saveonclose():
+##        savetofile(pdict)
+##        
+##        
+##    app.on_close(saveonclose)
+        
+    
+
+#########################################   MQTT    ###########################################################
+################# ON CONNECT CALLBACKS  #########################################      
+        
+    def on_connect(client, userdata, flags, rc):
+        print('on_connect')
+##        print('client: ' + str(client))
+##        print('userdata: ' + str(userdata))
+##        print('flags: ' + str(flags))
+##        print("rc:  "+ str(rc))
+        client.subscribe("topic/state")
+##        client.subscribe("topic/schedule")
+
+        
+    def on_disconnect():
+        print('on_disconnect')
+        
+        
+################### ON SUBSCRIBE CALL BACKS #######################
+        
+    def on_subscribe():
+        print('on_subscribe')
+        
+    def on_unsubscribe():
+        print('on_UNsubscribe')        
+  
+        
+    def on_message(client, userdata, msg):
+        print('any topic besides callbacks ' + str(msg.payload))
+##        pass        
+        
+##    def newschedule_on_message(client, userdata, msg):
+##        print('newschedulecallback message ' + str(msg.payload.decode("utf-8")
+##                                                   +str(datetime.now())))
+        
+    def scheduleconfirmation():
+        print('scheduleconfirm')
+        return True
+        
+    def state_on_message(client, userdata, msg):
+##        global pdict
+        print('statecallback: ' + str(msg.payload.decode("utf-8")) +
+              str(datetime.now()))
+##        print("THIS IS CLIENT FROM ON MESSAGEEEEEEE!!!")
+##        print(client)
+        auth1 = { *******'password':"***********" }
+        if msg.payload.decode("utf-8") == 'run':
+            print('in run')
+        elif msg.payload.decode("utf-8") == 'load':        
+            print('in load')
+            client.disconnect()
+            if app.yesno("Schedule Notification", "Load New Schedule?") is True:
+                newschedule = subscribe.simple('topic/schedule', qos=0, msg_count=1, retained=True, hostname="soldier.cloudmqtt.com",
+                          port=10429, client_id="parag", keepalive=60, will=None, auth=auth1, tls=None, protocol=mqtt.MQTTv311)
+            
+            ###################### DO STUFF SCHEDULE HERE########################################
+##            print(newschedule.payload.decode("utf-8"))
+                newscheduledict = parseschedulemessage(newschedule.payload.decode("utf-8"))
+            #CREATE SOME SORT OF POPUP, MODIFY THE MESSAGE AS NEEDED IN THE IF STATEMENTS
+                if newscheduledict is not None:
+                    
+                    print("SCHEDULE parse was SUCCESSFULL!")
+                    app.info("Success", "New Schedule Received Successfully!")
+                    replaceSchedule(newscheduledict)
+                    ##SET CURRENT SCHEDULE TO NEW SCHEDULE
+##                    pdict = copy.deepcopy(newscheduledict)
+##                    ##UPDATE NEW/CURRENT SCHEDULE
+##                    updateschedule(pdict)
+##                    print("REPLACED PDICT?!")
+##                    print(pdict)
+##                    app.update
+                    ##SAVE NEW SCHEDULE TO FILE
+                        ##DO THIS HERE!!!!
+                    
+                else:
+                    print("schedule parse failed, DO SOMETHING ABOUT IT!")
+                    app.error("ERROR", "New Schedule Fail, Please Resend")
+            else:
+                print("USER DOES NOT WANT TO UPLOAD SCHEDULE!!!!")
+            
+            print("publish run back to server!!")
+            publish.single('topic/state', payload='run', qos=2, retain=True, hostname="soldier.cloudmqtt.com",
+                            port=10429, client_id="parag", keepalive=60, will=None, auth=auth1, tls=None,
+                            protocol=mqtt.MQTTv311, transport="tcp")            
+            ##RECONNECT TO SERVER
+            try:
+                client.connect("soldier.cloudmqtt.com", 10429, 60)
+            except Exception as e:
+                print('connect error')
+                print(e)
+            finally:
+                print('finally2')
+            
+            
+        
+        
+##################### ON PUBLISH CALL BACKS ##############################
+    def on_publish(client, userdata, msg):
+        print('on publish callback')     
+
+                
+##################### MQTT SET UP #####################################
+        
+
+    client = mqtt.Client(client_id="parag", clean_session=False)
+    
+    client.username_pw_set("qvtkduzb","UUAHO3Zizszw")
+    
+    client.on_disconnect = on_disconnect
+    
+    client.on_subscribe = on_subscribe
+    
+    client.on_unsubscribe = on_unsubscribe
+    
+    client.on_connect = on_connect
+    
+    client.on_message = on_message
+    
+    client.on_publish = on_publish
+    
+    client.message_callback_add("topic/state", state_on_message)
+    
+##    client.message_callback_add("topic/schedule", newschedule_on_message)
+    
+    
+    try:
+        client.connect("soldier.cloudmqtt.com", 10429, 60)
+    except Exception as e:
+        print('connect error')
+        print(e)
+    finally:
+        print('finally1')
+        
+    client.loop_start()
+    
+    
+##    print("THIS IS CLIENT FROM MAIN!!!")
+##    print(client)
+    
+    
+##############################################   GUI   ########################################################## 
+        
+
+    def createupdateguihelper():
+        createdebuggui(app, pdict)
+    
+    title_box = Box(app, width="fill", align="top")
+    currentdaylabel = Text(title_box, text="currentday!", width="fill", align='left', size=36)
+    currenttimelabel = Text(title_box, text="currentTime!", width="fill", align='right', size=36)
+    daystartlabel = Text(app, text="daystart!!", height="fill", width="fill", size=36)
+    daystatelabel = Text(app, text="daystate!", height="fill", width="fill", size=36)
+    daypillpresenceLabel = Text(app, text="pillpresence/instructions!", height="fill", width="fill", size=36)
+    daypilllistLabel = Text(app, text="pill list!", height="fill", width="fill", size=36)
+    guiButton = PushButton(app, text="debug window", command=createupdateguihelper)
+
+    def updatemaingui():
+        currentday = updatecurrentdaypointer(pdict)
+        updatecurrentday(pdict, currentday)
+        
+        currentdatetime = datetime.now()
+        currentdaylabel.value = currentdatetime.date().strftime(dateformat)
+        currenttimelabel.value = currentdatetime.time().strftime(timeformat)
+        
+        daystartlabel.value = 'Start at: ' + pdict[currentday][DayField.STARTTIME.value].strftime(timeformat)
+        
+        #Additional logic comparing to daystate to generate colours for background
+        daystatetext = ''
+        daystatevalue = pdict[currentday][DayField.DAYSTATE.value]
+        
+        if daystatevalue is State.SCH.value:
+            daystatetext = "Scheduled"
+        elif daystatevalue is State.RUN.value:
+            daystatetext = "Running"
+        else:
+            daystatetext = "Terminated"
+        daystatelabel.value = daystatetext
+        
+        #Additional logic comparing to daystate to generate instructions
+        pillpresencetext = ''
+        if pdict[currentday][DayField.PILLPRESENCE.value] == True:
+            pillpresencetext ='Pills are Present'
+        else:
+            pillpresencetext = 'Pills are Taken!'        
+        daypillpresenceLabel.value = pillpresencetext
+        daypilllistLabel.value = "{}-{}-{}".format(pdict[currentday][DayField.PILLONE.value],
+                          pdict[currentday][DayField.PILLONE.value],
+                          pdict[currentday][DayField.PILLONE.value])
+        
+    def sensorupdate():
+        print("in sensorupdate")
+        currentday = updatecurrentdaypointer(pdict)
+        print("current day")
+        print(currentday)
+        print("pill presence?")
+        print(pdict[currentday][DayField.PILLPRESENCE.value])
+        print("event bag empty?")
+        print(len(sensordict[currentday][SensorField.BAG.value]) == 0)
+        print("message sent?")
+        print(sensordict[currentday][SensorField.MESSAGESENT.value])
+        print("all current day")
+        print(pdict[currentday])
+        
+        if len(sensordict[currentday][SensorField.BAG.value]) != 0:
+            currentdatetime = datetime.now()
+            currentdate = currentdatetime.date().strftime(dateformat)
+            currenttime = currentdatetime.time().strftime(timeformat)
+            
+            if pdict[currentday][DayField.DAYSTATE.value] == State.TER.value:
+                print("currentday is terminated")
+                if sensordict[currentday][SensorField.MESSAGESENT.value] is False:
+                    print("currentday is terminated and message not sent")
+                    
+                    print("send message now1")
+                    message1 = ("Pill MISSED at " + currentdate + " " + currenttime)
+                    
+                    print(message1)
+##                    sendsms(message1)
+                    print("update day state to terminated1")
+##                    pdict[currentday][DayField.DAYSTATE.value] = State.TER.value
+                    
+            elif pdict[currentday][DayField.DAYSTATE.value] == State.RUN.value:
+                print("currentday is running")
+                if sensordict[currentday][SensorField.MESSAGESENT.value] is False:
+                    print("currentday is running and message not sent")
+                    message2 = ("Pill taken SUCCESSFULLY at " + currentdate + " " + currenttime)
+                    print("send message now2")
+                    print(message2)
+##                    sendsms(message2)
+                    print("update day state to terminated2")
+##                    pdict[currentday][DayField.DAYSTATE.value] = State.TER.value
+                    
+            elif pdict[currentday][DayField.DAYSTATE.value] == State.SCH.value:
+                print("currentday is running")
+                if sensordict[currentday][SensorField.MESSAGESENT.value] is False:
+                    print("currentday is running and message not sent")
+                    
+                    print("send message now3")
+                    message3 = ("Pill taken EARLY at " + currentdate + " " + currenttime)
+                    print(message3)
+##                    sendsms(message3)
+                    print("update day state to terminated3")
+
+                    
+            else:
+                print("FELL THROUGH Sensor Message Actions!")
+            pdict[currentday][DayField.PILLPRESENCE.value] = False
+            
+            
+        print("exit sensorupdate")
+                            
+        
+        
+###############################  APP FINAL STUFF  #######################################
+        
+    app.repeat(1000, updatemaingui)
+    app.repeat(2000, sensorupdate)
+    
+    app.display()
+
+######################## END MAIN  ####################################
+    
+    
+    
+
+if __name__ == '__main__':
+    main()
+    
+    
+    
+    
+    
+    
+
+        
