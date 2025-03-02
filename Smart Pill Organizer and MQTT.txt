@@ -321,9 +321,9 @@ def main():
     
     
     def sendsms(message):
-        email = "ezpillorganizer"
+        email = "#############"
         pas = *******
-        ##clarke's number
+        ##2@@@@@@@ number
         ##sms_gateway = '*********@vtext.com' 
 
         sms_gateway = '**********4@vtext.com'
@@ -533,7 +533,7 @@ def main():
             client.disconnect()
             if app.yesno("Schedule Notification", "Load New Schedule?") is True:
                 newschedule = subscribe.simple('topic/schedule', qos=0, msg_count=1, retained=True, hostname="soldier.cloudmqtt.com",
-                          port=10429, client_id="parag", keepalive=60, will=None, auth=auth1, tls=None, protocol=mqtt.MQTTv311)
+                          port=10429, client_id="#######", keepalive=60, will=None, auth=auth1, tls=None, protocol=mqtt.MQTTv311)
             
             ###################### DO STUFF SCHEDULE HERE########################################
 ##            print(newschedule.payload.decode("utf-8"))
@@ -562,7 +562,7 @@ def main():
             
             print("publish run back to server!!")
             publish.single('topic/state', payload='run', qos=2, retain=True, hostname="soldier.cloudmqtt.com",
-                            port=10429, client_id="parag", keepalive=60, will=None, auth=auth1, tls=None,
+                            port=10429, client_id="#######", keepalive=60, will=None, auth=auth1, tls=None,
                             protocol=mqtt.MQTTv311, transport="tcp")            
             ##RECONNECT TO SERVER
             try:
@@ -606,7 +606,7 @@ def main():
     
     
     try:
-        client.connect("soldier.cloudmqtt.com", 10429, 60)
+        client.connect("soldier.cloudmqtt.com", $$$$$, 60)
     except Exception as e:
         print('connect error')
         print(e)
